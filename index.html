@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Temperaturkurve von Wasser</title>
+<style>
+  :root {
+    --bg: #f4f1ea; --card: #ffffff; --ink: #1f2328; --muted: #5f6670;
+    --line: #d9d4c8; --grid: #ebe7de; --glass: #8a95a3; --accent: #c2410c;
+    --ice: #4f9fd8; --melt: #7c6fd6; --water: #1f8a9e; --boil: #e08a1e; --steam: #c8423a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15181c; --card: #1e2227; --ink: #e8e6e1; --muted: #a0a7b0;
+      --line: #343a42; --grid: #2a2f36; --glass: #9aa6b4;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15181c; --card: #1e2227; --ink: #e8e6e1; --muted: #a0a7b0;
+    --line: #343a42; --grid: #2a2f36; --glass: #9aa6b4;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; line-height: 1.35;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 16px; }
+  h1 { margin: 0 0 2px; font-size: 1.4rem; letter-spacing: -0.01em; }
+  .sub { margin: 0 0 12px; color: var(--muted); font-size: .9rem; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+
+  /* Hauptbereich: Kurve links, Balken rechts */
+  .view { display: grid; grid-template-columns: 1fr 180px 270px; gap: 14px; align-items: stretch; }
+  #graph { width: 100%; height: 360px; display: block; cursor: ew-resize; touch-action: none; }
+  .hint { font-size: .8rem; color: var(--muted); margin-left: auto; }
+  #beaker { width: 180px; height: 360px; display: block; }
+
+  .bars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; height: 360px; }
+  .bar { display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 0; }
+  .bar .pct { font-size: 1.35rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .bar .tube {
+    position: relative; flex: 1; width: 100%; border-radius: 12px;
+    background: var(--grid); border: 1px solid var(--line); overflow: hidden;
+  }
+  .bar .fill { position: absolute; left: 0; right: 0; bottom: 0; height: 0%; }
+  .bar.ice .fill { background: var(--ice); }
+  .bar.water .fill { background: var(--water); }
+  .bar.steam .fill { background: var(--steam); }
+  .bar .name { font-weight: 700; }
+  .bar .mass { font-size: .8rem; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: -4px; }
+
+  /* Steuerleiste */
+  .bar-row {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px;
+    margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line);
+  }
+  button {
+    padding: 8px 16px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--ink); font-size: .95rem; font-weight: 600; cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; min-width: 90px; }
+  .speed { display: flex; align-items: center; gap: 8px; flex: 1 1 220px; }
+  .speed label { font-weight: 600; white-space: nowrap; }
+  .speed input { flex: 1; accent-color: var(--accent); }
+  .speed output { min-width: 56px; font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 700; }
+  .stat { font-size: .8rem; color: var(--muted); }
+  .stat b { display: block; font-size: 1.1rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .tstat { border: 3px solid #d62828; border-radius: 12px; padding: 4px 14px 6px; }
+  .tstat b { font-size: 1.9rem; font-weight: 800; line-height: 1.1; }
+  .phase {
+    padding: 6px 12px; border-radius: 999px; font-weight: 700; color: #fff; font-size: .9rem; white-space: nowrap;
+  }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; font-size: .8rem; color: var(--muted); }
+  .legend i { display: inline-block; width: 16px; height: 4px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+  .note { margin-top: 6px; font-size: .78rem; color: var(--muted); }
+
+  /* Tablet: Die gesamte Ansicht wird als Ganzes auf genau eine Bildschirmseite skaliert.
+     Layout und Inhalt bleiben unverändert. */
+  html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+  body { position: fixed; inset: 0; -webkit-text-size-adjust: 100%; -webkit-user-select: none; user-select: none;
+         -webkit-tap-highlight-color: transparent; }
+  .wrap { width: 1180px; max-width: none; position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+  button, input { touch-action: manipulation; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Temperaturkurve von Wasser</h1>
+  <p class="sub">300 g Eis bei −20 °C wird mit konstant 1000 W erhitzt.</p>
+
+  <div class="card">
+    <div class="view">
+      <div>
+        <canvas id="graph" aria-label="Temperatur-Zeit-Diagramm"></canvas>
+        <div class="legend" id="legend"></div>
+      </div>
+      <canvas id="beaker" aria-label="Glas mit Eis"></canvas>
+      <div class="bars">
+        <div class="bar ice"><div class="pct" id="pIce">0 %</div><div class="tube"><div class="fill" id="fIce"></div></div><div class="name">Eis</div><div class="mass" id="mIce"></div></div>
+        <div class="bar water"><div class="pct" id="pWater">0 %</div><div class="tube"><div class="fill" id="fWater"></div></div><div class="name">Wasser</div><div class="mass" id="mWater"></div></div>
+        <div class="bar steam"><div class="pct" id="pSteam">0 %</div><div class="tube"><div class="fill" id="fSteam"></div></div><div class="name">Dampf</div><div class="mass" id="mSteam"></div></div>
+      </div>
+    </div>
+
+    <div class="bar-row">
+      <button id="play" class="primary">Start</button>
+      <button id="reset">Zurücksetzen</button>
+      <div class="speed">
+        <label for="speed">Zeitraffer</label>
+        <input id="speed" type="range" min="0" max="100" step="1" value="50">
+        <output id="speedOut">20×</output>
+      </div>
+      <div class="stat tstat">Temperatur<b id="rT">–</b></div>
+      <div class="stat">Zeit<b id="rt">–</b></div>
+      <div class="stat">Energie<b id="rQ">–</b></div>
+      <span class="phase" id="phase"></span>
+      <span class="hint">Tipp: Im Diagramm klicken und ziehen, um vor- und zurückzuspulen.<br>Hinweis: Der Abschnitt „Sieden“ ist auf der Zeitachse verkürzt dargestellt (⫽).</span>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const C_ICE = 2100, C_WATER = 4186, C_STEAM = 2010, L_F = 334000, L_V = 2256000;
+  const m = 0.3, P = 1000, T0 = -20, T_MAX = 110, Y_MIN = -40, Y_MAX = 120;
+
+  const PHASES = {
+    ice:   { label: 'Eis erwärmen',     color: '--ice' },
+    melt:  { label: 'Schmelzen (0 °C)', color: '--melt' },
+    water: { label: 'Wasser erwärmen',  color: '--water' },
+    boil:  { label: 'Sieden (100 °C)',  color: '--boil' },
+    steam: { label: 'Dampf erwärmen',   color: '--steam' }
+  };
+  const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const $ = id => document.getElementById(id);
+  const fmt = (n, d = 0) => n.toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
+
+  function energyFromT(T) {
+    if (T <= 0) return m * C_ICE * T;
+    if (T <= 100) return m * L_F + m * C_WATER * T;
+    return m * L_F + m * C_WATER * 100 + m * L_V + m * C_STEAM * (T - 100);
+  }
+  function stateFromE(E) {
+    const qMelt = m * L_F, qWater = m * C_WATER * 100, qBoil = m * L_V;
+    if (E < 0) return { T: E / (m * C_ICE), ice: 1, water: 0, steam: 0, phase: 'ice' };
+    if (E < qMelt) { const f = E / qMelt; return { T: 0, ice: 1 - f, water: f, steam: 0, phase: 'melt' }; }
+    E -= qMelt;
+    if (E < qWater) return { T: E / (m * C_WATER), ice: 0, water: 1, steam: 0, phase: 'water' };
+    E -= qWater;
+    if (E < qBoil) { const f = E / qBoil; return { T: 100, ice: 0, water: 1 - f, steam: f, phase: 'boil' }; }
+    E -= qBoil;
+    return { T: 100 + E / (m * C_STEAM), ice: 0, water: 0, steam: 1, phase: 'steam' };
+  }
+
+  const E0 = energyFromT(T0), tEnd = (energyFromT(T_MAX) - E0) / P;
+
+  // Gestauchte Zeitachse: Der Abschnitt "Sieden" wird im Diagramm verkürzt dargestellt
+  // (Achsenbruch). Die Physik und alle Zahlenwerte bleiben unverändert.
+  const K_BOIL = 0.3;                                    // Stauchungsfaktor
+  const tB0 = (energyFromT(100) - E0) / P, tB1 = tB0 + m * L_V / P;
+  const warp = tt => tt <= tB0 ? tt : tt <= tB1 ? tB0 + (tt - tB0) * K_BOIL : tB0 + (tB1 - tB0) * K_BOIL + (tt - tB1);
+  const unwarp = w => w <= tB0 ? w : w <= tB0 + (tB1 - tB0) * K_BOIL ? tB0 + (w - tB0) / K_BOIL : w - (tB0 + (tB1 - tB0) * K_BOIL) + tB1;
+  const wEnd = warp(tEnd);
+  let t = 0, running = false, last = null;
+
+  for (const p of Object.values(PHASES))
+    $('legend').insertAdjacentHTML('beforeend', `<span><i style="background:var(${p.color})"></i>${p.label}</span>`);
+
+  function update(s) {
+    $('rT').textContent = fmt(s.T, 1).replace('-', '−') + ' °C';
+    $('rt').textContent = fmt(t / 60, 1) + ' min';
+    $('rQ').textContent = fmt(P * t / 1000, 0) + ' kJ';
+    for (const [k, key] of [['Ice', 'ice'], ['Water', 'water'], ['Steam', 'steam']]) {
+      $('f' + k).style.height = (s[key] * 100) + '%';
+      $('p' + k).textContent = fmt(s[key] * 100) + ' %';
+      $('m' + k).textContent = fmt(s[key] * m * 1000) + ' g';
+    }
+    const ph = $('phase');
+    ph.textContent = PHASES[s.phase].label;
+    ph.style.background = css(PHASES[s.phase].color);
+  }
+
+  const gc = $('graph');
+  function drawGraph() {
+    const W = gc.clientWidth, H = gc.clientHeight, dpr = window.devicePixelRatio || 1;
+    gc.width = W * dpr; gc.height = H * dpr;
+    const ctx = gc.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const pad = { l: 52, r: 10, t: 10, b: 36 }, pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
+    const X = tt => pad.l + (warp(tt) / wEnd) * pw;
+    plot = { l: pad.l, w: pw };
+    const Y = T => pad.t + (1 - (T - Y_MIN) / (Y_MAX - Y_MIN)) * ph;
+    ctx.font = '12px system-ui, sans-serif';
+
+    ctx.strokeStyle = css('--grid'); ctx.fillStyle = css('--muted'); ctx.lineWidth = 1;
+    ctx.textAlign = 'center';
+    const spanMin = tEnd / 60;
+    const stepMin = spanMin > 30 ? 5 : spanMin > 12 ? 2 : 1;
+    for (let v = 0; v <= spanMin + 1e-9; v += stepMin) {
+      const tt = v * 60;
+      if (tt > tB0 + 20 && tt < tB1 - 20) continue;        // im gestauchten Bereich keine Teilstriche
+      const x = X(tt);
+      ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, pad.t + ph); ctx.stroke();
+      ctx.fillText(v, x, pad.t + ph + 16);
+    }
+    // Ende des Siedens beschriften, damit die echte Dauer ablesbar bleibt
+    { const x = X(tB1);
+      ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, pad.t + ph); ctx.stroke();
+      ctx.textAlign = 'right'; ctx.fillText(fmt(tB1 / 60, 1), x + 4, pad.t + ph + 16); ctx.textAlign = 'center'; }
+    // Achsenbruch-Zeichen in der Mitte des Siedeabschnitts
+    const xb = (X(tB0) + X(tB1)) / 2, yb = pad.t + ph;
+    ctx.save();
+    ctx.fillStyle = css('--card'); ctx.fillRect(xb - 7, yb - 7, 14, 14);
+    ctx.strokeStyle = css('--muted'); ctx.lineWidth = 1.5; ctx.setLineDash([]);
+    for (const dx of [-4, 3]) { ctx.beginPath(); ctx.moveTo(xb + dx - 3, yb + 6); ctx.lineTo(xb + dx + 3, yb - 6); ctx.stroke(); }
+    ctx.restore();
+    ctx.fillText('Zeit in min', pad.l + pw / 2, H - 4);
+    ctx.textAlign = 'right';
+    for (let T = -40; T <= Y_MAX; T += 20) {
+      const y = Y(T);
+      ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + pw, y); ctx.stroke();
+      ctx.fillText(T + ' °C', pad.l - 6, y + 4);
+    }
+    ctx.setLineDash([6, 5]); ctx.strokeStyle = css('--glass');
+    for (const T of [0, 100]) { ctx.beginPath(); ctx.moveTo(pad.l, Y(T)); ctx.lineTo(pad.l + pw, Y(T)); ctx.stroke(); }
+    ctx.setLineDash([]);
+
+    const N = 600;
+    ctx.strokeStyle = css('--line'); ctx.lineWidth = 2; ctx.beginPath();
+    for (let i = 0; i <= N; i++) {
+      const tt = tEnd * i / N, y = Y(stateFromE(E0 + P * tt).T);
+      i ? ctx.lineTo(X(tt), y) : ctx.moveTo(X(tt), y);
+    }
+    ctx.stroke();
+
+    if (t > 0) {
+      ctx.lineWidth = 4; ctx.lineCap = 'round';
+      const n = Math.max(2, Math.round(N * t / tEnd));
+      let px = X(0), py = Y(T0);
+      for (let i = 1; i <= n; i++) {
+        const tt = t * i / n, s = stateFromE(E0 + P * tt), x = X(tt), y = Y(s.T);
+        ctx.strokeStyle = css(PHASES[s.phase].color);
+        ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(x, y); ctx.stroke();
+        px = x; py = y;
+      }
+    }
+    const cur = stateFromE(E0 + P * t);
+    ctx.fillStyle = css(PHASES[cur.phase].color);
+    ctx.beginPath(); ctx.arc(X(t), Y(cur.T), 7, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = css('--card'); ctx.lineWidth = 2; ctx.stroke();
+  }
+
+  // ---------- Glas ----------
+  // Maßstab: 1 Liter Flüssigkeit = 130 px Füllhöhe im Glas (Innenbreite 136 px)
+  const bk = $('beaker');
+  const GX0 = 22, GX1 = 158, GW = GX1 - GX0, Y_TOP = 40, Y_BOT = 230;
+  const A_LITER = GW * 130;          // Fläche für 1 Liter
+  const RHO_RATIO = 0.917;           // Dichte Eis / Dichte Wasser
+  const CUBE = 40, COLS = 3;
+
+  function drawBeaker(s) {
+    const W = bk.clientWidth, H = bk.clientHeight, dpr = window.devicePixelRatio || 1;
+    bk.width = W * dpr; bk.height = H * dpr;
+    const ctx = bk.getContext('2d');
+    const k = Math.min(W / 180, H / 360);
+    ctx.setTransform(dpr * k, 0, 0, dpr * k, dpr * (W - 180 * k) / 2, dpr * (H - 360 * k));
+
+    // --- Füllstand nach Archimedes ---
+    const iceCount = s.ice * 12;                       // 12 Würfel = 1 kg Eis = 1,09 L
+    const cubes = Math.ceil(iceCount - 1e-9);
+    const wi = cubes ? Math.min(COLS, cubes) * CUBE : 0;
+    const hi = cubes ? (s.ice * 1.09 * A_LITER) / wi : 0;    // Höhe des Eisstapels
+    const aw = s.water * A_LITER;                            // Fläche des flüssigen Wassers
+    // Schmelzwasser sammelt sich zuerst in den Lücken zwischen und neben den Eiswürfeln.
+    // Der Pegel steigt daher anfangs langsam. Sobald das Eis schwimmt, verdrängt es genau
+    // so viel Wasser, wie es selbst wiegt: Der Pegel ändert sich dann nicht mehr.
+    // Am Ende steht das Wasser tiefer als der ursprüngliche Eisstapel (Eis hat die geringere Dichte).
+    const POROSITY = 0.45;                                   // Anteil der Lücken im Eisstapel
+    const freeArea = cubes ? GW - wi * (1 - POROSITY) : GW;
+    const levelFull = (s.water + s.ice) * A_LITER / GW;     // Pegel mit schwimmendem Eis
+    const level = Math.min(aw / freeArea, levelFull);
+    const iceBottom = cubes ? Math.max(0, level - RHO_RATIO * hi) : 0;
+
+    // Dampf im Glas
+    if (s.phase === 'steam') {
+      ctx.fillStyle = css('--steam'); ctx.globalAlpha = 0.1;
+      ctx.fillRect(GX0 + 2, Y_TOP + 4, GW - 4, Y_BOT - Y_TOP - 4); ctx.globalAlpha = 1;
+    }
+
+    // Eiswürfel
+    const xStart = GX0 + (GW - wi) / 2;
+    for (let i = 0; i < cubes; i++) {
+      const col = i % COLS, row = Math.floor(i / COLS);
+      const part = (i === cubes - 1) ? Math.max(0.3, iceCount - (cubes - 1)) : 1;
+      const sz = (CUBE - 3) * Math.sqrt(part);
+      const cx = xStart + col * CUBE + (CUBE - sz) / 2;
+      const cy = Y_BOT - iceBottom - (row + 1) * CUBE + (CUBE - 3 - sz) + 1.5;
+      ctx.fillStyle = css('--ice'); ctx.globalAlpha = 0.8;
+      roundRect(ctx, cx, cy, sz, sz, 4); ctx.fill();
+      ctx.globalAlpha = 1; ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cx + 6, cy + 7); ctx.lineTo(cx + sz * 0.55, cy + 7); ctx.stroke();
+    }
+
+    // Wasser (durchscheinend über dem Eis, damit der eingetauchte Teil sichtbar ist)
+    if (level > 0.5) {
+      ctx.fillStyle = css('--water'); ctx.globalAlpha = 0.45;
+      ctx.fillRect(GX0 + 2, Y_BOT - level, GW - 4, level);
+      ctx.globalAlpha = 0.95; ctx.fillRect(GX0 + 2, Y_BOT - level, GW - 4, 2.5);
+      ctx.globalAlpha = 1;
+    }
+
+    // Blasen beim Sieden
+    if (s.phase === 'boil' && level > 8) {
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      for (let i = 0; i < 16; i++) {
+        const bx = GX0 + 8 + ((i * 37) % (GW - 16));
+        const p0 = ((i * 7919) % 101) / 101, sp = 40 + ((i * 13) % 7) * 12;
+        const by = Y_BOT - 3 - ((anim * sp + p0 * level) % (level - 5));
+        ctx.beginPath(); ctx.arc(bx, by, 1.5 + (i % 3), 0, Math.PI * 2); ctx.fill();
+      }
+    }
+
+    // Dampfschwaden über dem Glas
+    const steamAmt = s.phase === 'boil' ? 0.3 + 0.7 * s.steam : s.steam;
+    if (steamAmt > 0) {
+      ctx.strokeStyle = css('--muted'); ctx.lineWidth = 3; ctx.lineCap = 'round';
+      for (let j = 0; j < 4; j++) {
+        const bx = GX0 + 18 + j * 33;
+        ctx.globalAlpha = 0.25 + 0.55 * steamAmt;
+        ctx.beginPath();
+        for (let y = 0; y <= 14 + 20 * steamAmt; y += 2) {
+          const yy = Y_TOP - 4 - y, xx = bx + Math.sin(y / 7 + anim * 3 + j) * 5;
+          y ? ctx.lineTo(xx, yy) : ctx.moveTo(xx, yy);
+        }
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // Glas
+    ctx.strokeStyle = css('--glass'); ctx.lineWidth = 4; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.moveTo(GX0 - 6, Y_TOP); ctx.lineTo(GX0, Y_TOP + 5); ctx.lineTo(GX0, Y_BOT);
+    ctx.lineTo(GX1, Y_BOT); ctx.lineTo(GX1, Y_TOP + 5); ctx.lineTo(GX1 + 6, Y_TOP); ctx.stroke();
+
+    drawBurner(ctx);
+  }
+
+  // Dreifuß mit Drahtnetz und Bunsenbrenner
+  function drawBurner(ctx) {
+    const metal = css('--glass'), cx = 90;
+    const gauzeY = Y_BOT + 4;
+    // Drahtnetz
+    ctx.fillStyle = metal; ctx.fillRect(GX0 - 14, gauzeY, GW + 28, 4);
+    ctx.strokeStyle = metal; ctx.lineWidth = 1; ctx.globalAlpha = 0.5;
+    for (let x = GX0 - 10; x < GX1 + 14; x += 6) {
+      ctx.beginPath(); ctx.moveTo(x, gauzeY); ctx.lineTo(x + 3, gauzeY + 4); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    // Dreifuß-Beine
+    ctx.lineWidth = 3.5; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(GX0 - 8, gauzeY + 4); ctx.lineTo(GX0 - 20, 352);
+    ctx.moveTo(GX1 + 8, gauzeY + 4); ctx.lineTo(GX1 + 20, 352);
+    ctx.stroke();
+
+    // Brenner: Fuß und Rohr
+    const tubeTop = 300;
+    ctx.fillStyle = metal;
+    roundRect(ctx, cx - 28, 346, 56, 10, 4); ctx.fill();
+    ctx.fillRect(cx - 7, tubeTop, 14, 48);
+    ctx.fillStyle = css('--line'); ctx.fillRect(cx - 7, 330, 14, 5);   // Luftregler
+    ctx.fillStyle = metal; ctx.fillRect(cx - 9, tubeTop - 3, 18, 5);   // Rohröffnung
+
+    if (!running && !dragging) return;
+
+    // Flamme: äußerer Mantel (gelb-orange) und innerer Kegel (blau)
+    const base = tubeTop - 2;
+    const fl = Math.sin(anim * 17) * 3 + Math.sin(anim * 29 + 1) * 2;
+    const h = 60 + fl, w = 15 + Math.sin(anim * 23) * 1.5;
+    const tipX = cx + Math.sin(anim * 11) * 3;
+
+    const g = ctx.createLinearGradient(0, base, 0, base - h);
+    g.addColorStop(0, 'rgba(255,170,40,0.95)');
+    g.addColorStop(0.5, 'rgba(255,120,20,0.85)');
+    g.addColorStop(1, 'rgba(230,60,10,0.0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(cx - w * 0.6, base);
+    ctx.bezierCurveTo(cx - w * 1.2, base - h * 0.35, tipX - w * 0.5, base - h * 0.75, tipX, base - h);
+    ctx.bezierCurveTo(tipX + w * 0.5, base - h * 0.75, cx + w * 1.2, base - h * 0.35, cx + w * 0.6, base);
+    ctx.closePath(); ctx.fill();
+
+    const hb = 26 + fl * 0.4;
+    const gb = ctx.createLinearGradient(0, base, 0, base - hb);
+    gb.addColorStop(0, 'rgba(40,110,255,0.95)');
+    gb.addColorStop(1, 'rgba(120,180,255,0.6)');
+    ctx.fillStyle = gb;
+    ctx.beginPath();
+    ctx.moveTo(cx - 6, base);
+    ctx.quadraticCurveTo(cx - 6, base - hb * 0.6, cx, base - hb);
+    ctx.quadraticCurveTo(cx + 6, base - hb * 0.6, cx + 6, base);
+    ctx.closePath(); ctx.fill();
+  }
+
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+  }
+
+  let anim = 0, dragging = false, plot = { l: 52, w: 1 };
+  function render() { const s = stateFromE(E0 + P * t); update(s); drawGraph(); drawBeaker(s); }
+
+  function loop(ts) {
+    anim = ts / 1000;
+    if (running) {
+      if (last !== null) {
+        t += (ts - last) / 1000 * speedFactor();
+        if (t >= tEnd) { t = tEnd; running = false; $('play').textContent = 'Start'; }
+      }
+      last = ts;
+      render();
+    } else { last = null; if (dragging) render(); }
+    requestAnimationFrame(loop);
+  }
+
+  $('play').addEventListener('click', () => {
+    if (t >= tEnd) t = 0;
+    running = !running;
+    $('play').textContent = running ? 'Pause' : 'Weiter';
+    render();
+  });
+  $('reset').addEventListener('click', () => {
+    running = false; t = 0; $('play').textContent = 'Start'; render();
+  });
+  // Logarithmischer Regler: 1× (Echtzeit) bis 500×
+  function speedFactor() { return Math.pow(500, +$('speed').value / 100); }
+  function showSpeed() {
+    const f = speedFactor();
+    $('speedOut').textContent = (f < 10 ? fmt(f, 1) : fmt(Math.round(f / 5) * 5)) + '×';
+  }
+  $('speed').addEventListener('input', showSpeed);
+  showSpeed();
+  // Auf Bildschirmgröße einpassen (Hoch- und Querformat)
+  const wrapEl = document.querySelector('.wrap');
+  let scale = 1;
+  function fit() {
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const h = wrapEl.offsetHeight;
+    scale = Math.min(vw / 1180, vh / h);
+    const x = (vw - 1180 * scale) / 2, y = Math.max(0, (vh - h * scale) / 2);
+    wrapEl.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+  }
+  window.addEventListener('resize', () => { fit(); render(); });
+  window.addEventListener('orientationchange', () => setTimeout(() => { fit(); render(); }, 200));
+
+  // Zeitpunkt im Diagramm mit Maus oder Finger verschieben
+  function scrubTo(ev) {
+    const r = gc.getBoundingClientRect();
+    const k = r.width / gc.clientWidth;                  // Skalierung berücksichtigen
+    const f = ((ev.clientX - r.left) / k - plot.l) / plot.w;
+    t = Math.min(tEnd, Math.max(0, unwarp(f * wEnd)));
+    render();
+  }
+  gc.addEventListener('pointerdown', ev => {
+    dragging = true; running = false; $('play').textContent = t > 0 ? 'Weiter' : 'Start';
+    gc.setPointerCapture(ev.pointerId); scrubTo(ev);
+  });
+  gc.addEventListener('pointermove', ev => { if (dragging) scrubTo(ev); });
+  const endDrag = () => {
+    if (!dragging) return;
+    dragging = false;
+    $('play').textContent = t >= tEnd ? 'Start' : (t > 0 ? 'Weiter' : 'Start');
+    render();
+  };
+  gc.addEventListener('pointerup', endDrag);
+  gc.addEventListener('pointercancel', endDrag);
+
+  fit();
+  render();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
